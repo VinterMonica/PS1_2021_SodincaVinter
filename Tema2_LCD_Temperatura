@@ -1,0 +1,111 @@
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+int main()
+{
+   OCR1A=15625;//(cu formula: (16MHz/1024)*1)- intrerupere 1s
+  TCCR1B|=(1 << WGM12); // (modul CTC)
+  TCCR1B|=(1 << CS12)|(1 << CS10);//selectam prescalerul la 1024
+  TIMSK1|=(1 << OCIE1A);//Acest bit va activa o întrerupere atunci când 
+  //se va găsi egalitate la comparare
+   lcd.begin(16, 2);
+  
+   sei();
+   ADC_Init();
+  while(1)
+  {
+   
+  }
+}
+
+void ADC_Init()//adc initialization
+{
+  ADCSRA |= ((1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0));//set division factor between system clock 
+//frequency and the input clock to the ADC- 128
+  ADMUX |= (1<<REFS0);//AVcc with external capacitor at Aref pin 
+  ADCSRA |= (1<<ADEN);//enable ADC
+  ADCSRA |= (1<<ADSC);//ADC start conversion
+}
+
+uint16_t read_adc(uint8_t channel)
+{
+  ADMUX &= 0xF0;//set input AO to A5
+  ADMUX |= channel;//select chanel AO to A5
+  ADCSRA |= (1<<ADSC);//start conversion
+  
+  while(ADCSRA & (1<<ADSC));//wait wile adc conversion are not updated 
+   return ADCW;//read and return voltage
+}
+
+void afisare_temperatura(int temp)
+{
+   if(temp<0)
+   {
+    temp=-temp;
+   }
+  
+   int ogl=0;
+   
+   while(temp!=0)
+   {
+    ogl=ogl*10+temp%10;
+    temp=temp/10;
+   }
+
+}
+
+int secunde=7,zeci_secunde=5,minute=9,zeci_minute=5,ore=4,zeci_ore=1;
+
+ISR(TIMER1_COMPA_vect)
+{ 
+               
+  int numar_CAN=read_adc(0);
+  int tensiune=(float)numar_CAN*5000/1023;
+  int temperatura=(tensiune-500)/10;
+  
+  lcd.setCursor(0,0);
+   lcd.print("Temp = ");
+   lcd.print(temperatura);
+   lcd.print("'C");
+  
+   secunde++;
+  
+   if (secunde == 10)
+   {
+        zeci_secunde ++;
+        secunde = 0;
+   }
+   if (zeci_secunde == 6)
+   {
+       minute ++;
+       zeci_secunde = 0;
+   }
+   if (minute == 10)
+   {
+       zeci_minute++;
+       minute = 0;
+   }
+   if(zeci_minute == 6)
+   {
+       ore++;
+       zeci_minute = 0;
+   }
+   if(ore == 10)
+   {
+       zeci_ore++;
+       ore = 0;
+   }
+
+  lcd.setCursor(0,1);
+   lcd.print("Ora: ");
+   lcd.print(zeci_ore);
+   lcd.print(ore);
+   lcd.print(':');
+   lcd.print(zeci_minute);
+   lcd.print(minute);
+   lcd.print(':');
+   lcd.print(zeci_secunde);
+   lcd.print(secunde);
+ 
+}
+ 
