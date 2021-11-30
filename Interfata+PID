@@ -1,0 +1,314 @@
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+#define BUTTON_OK 6
+#define BUTTON_CANCEL 7
+#define BUTTON_PREV 8
+#define BUTTON_NEXT 9
+
+ enum Buttons {
+  EV_OK,
+  EV_CANCEL,
+  EV_NEXT,
+  EV_PREV,
+  EV_NONE,
+  EV_MAX_NUM
+};
+
+enum Menus {
+  MENU_MAIN = 0,
+  MENU_Tset,
+  MENU_tincalzire,
+  MENU_tmentinere,
+  MENU_tracire,
+  MENU_KP,
+  MENU_KI,
+  MENU_KD,
+  MENU_TEMP,
+  MENU_MAX_NUM
+};
+
+int main()
+{
+ 
+  Serial.begin(9600);
+  lcd.begin(16,2);
+  
+  digitalWrite(6, LOW); // pull-down
+    pinMode(7, INPUT);
+  digitalWrite(7, LOW); // pull-down
+    pinMode(8, INPUT);
+  digitalWrite(8, LOW); // pull-down
+    pinMode(9, INPUT);
+  digitalWrite(9, LOW); // pull-down
+  
+   OCR1A=15625;//(cu formula: (16MHz/1024)*1)- intrerupere 1s
+  TCCR1B|=(1 << WGM12); // (modul CTC)
+  TCCR1B|=(1 << CS12)|(1 << CS10);//selectam prescalerul la 1024
+  TIMSK1|=(1 << OCIE1A);//Acest bit va activa o întrerupere atunci când 
+  //se va găsi egalitate la comparare
+ 
+   sei();
+   ADC_Init();
+  while(1)
+  {
+   
+  }
+}
+
+//parametrii:
+double kp = 1, ki = 0.1, kd = 0.1;
+double T_set, t_incalzire, t_mentinere, t_racire;
+
+//variabile necesarea pentru calcularea PID:
+double eroare= 0;
+double suma_erori= 0;
+double eroare_anterioara = 0;
+double derivativa = 0;
+double dt=1; // timp esantionare
+double setpoint = 30;
+double PID;
+int temperatura;
+
+Menus scroll_menu = MENU_MAIN;
+Menus current_menu =  MENU_MAIN;
+
+
+void state_machine(enum Menus menu, enum Buttons button);
+Buttons GetButtons(void);
+void print_menu(enum Menus menu);
+
+typedef void (state_machine_handler_t)(void);
+
+void print_menu(enum Menus menu)
+{
+  lcd.clear();
+  switch(menu)
+  {
+    case MENU_Tset:
+    	lcd.print("T.set = ");
+    	lcd.print(T_set);
+    	break;
+    case MENU_tincalzire:
+    	lcd.print("t.incalz = ");
+    	lcd.print(t_incalzire);
+    	break;
+    case MENU_tmentinere:
+    	lcd.print("t.mentin = ");
+    	lcd.print(t_mentinere);
+    	break;
+    case MENU_tracire:
+    	lcd.print("t.racire = ");
+    	lcd.print(t_racire);
+    	break;
+    case MENU_KP:
+    	lcd.print("KP = ");
+    	lcd.print(kp);
+    	break;
+    case MENU_KI:
+    	lcd.print("KI = ");
+    	lcd.print(ki);
+    	break;
+    case MENU_KD:
+    	lcd.print("KD = ");
+    	lcd.print(kd);
+    	break;
+    case MENU_TEMP:
+    	lcd.print("TEMP = ");
+    	lcd.print(temperatura);
+    	break;
+    case MENU_MAIN:
+    default:
+    	lcd.print("PS 2021");
+   		break;
+  }
+  if(current_menu != MENU_MAIN)
+  {
+  	lcd.setCursor(0,1);
+  	lcd.print("modifica");
+  }
+}
+
+void enter_menu(void)
+{
+  current_menu = scroll_menu;
+}
+
+void go_home(void)
+{
+  scroll_menu = MENU_MAIN;
+  current_menu = scroll_menu;
+}
+
+void go_next(void)
+{
+  scroll_menu = (Menus) ((int)scroll_menu + 1);
+  scroll_menu = (Menus) ((int)scroll_menu % MENU_MAX_NUM);
+}
+
+void go_prev(void)
+{
+  scroll_menu = (Menus) ((int)scroll_menu - 1);
+  scroll_menu = (Menus) ((int)scroll_menu % MENU_MAX_NUM);
+}
+
+void inc_T_set(void)
+{
+  T_set++;
+}
+
+void dec_T_set(void)
+{
+  T_set--;
+}
+
+void inc_t_incalzire(void)
+{
+  t_incalzire++;
+}
+
+void dec_t_incalzire(void)
+{
+  t_incalzire--;
+}
+void inc_t_mentinere(void)
+{
+  t_mentinere++;
+}
+
+void dec_t_mentinere(void)
+{
+  t_mentinere--;
+}
+void inc_t_racire(void)
+{
+  t_racire++;
+}
+
+void dec_t_racire(void)
+{
+  t_racire--;
+}
+void inc_kp(void)
+{
+  kp++;
+}
+
+void dec_kp(void)
+{
+  kp--;
+}
+
+void inc_ki(void)
+{
+  ki=ki+0.1;
+}
+
+void dec_ki(void)
+{
+  ki=ki-0.1;
+}
+void inc_kd(void)
+{
+  kd=kd+0.1;
+}
+
+void dec_kd(void)
+{
+  kd=kd-0.1;
+}
+
+void inc_temp(void)
+{
+ temperatura++;
+}
+
+void dec_temp(void)
+{
+ temperatura--;
+}
+
+
+state_machine_handler_t* sm[MENU_MAX_NUM][EV_MAX_NUM] = 
+{ //events: OK , CANCEL , NEXT, PREV
+  {enter_menu, go_home, go_next, go_prev},  // MENU_MAIN
+  {go_home, go_home, inc_T_set, dec_T_set}, // MENU_Tset
+  {go_home, go_home, inc_t_incalzire, dec_t_incalzire}, // MENU_tincalzire
+  {go_home, go_home, inc_t_mentinere, dec_t_mentinere}, // MENU_tmentinere
+  {go_home, go_home, inc_t_racire, dec_t_racire},       // MENU_tracire
+  {go_home, go_home, inc_kp, dec_kp},       // MENU_KP
+  {go_home, go_home, inc_ki, dec_ki},       // MENU_KI
+  {go_home, go_home, inc_kd, dec_kd},       // MENU_KD
+  {go_home, go_home, inc_temp, dec_temp},   // MENU_TEMP
+};
+
+void state_machine(enum Menus menu, enum Buttons button)
+{
+  sm[menu][button]();
+}
+
+Buttons GetButtons(void)
+{
+  enum Buttons ret_val = EV_NONE;
+  if (digitalRead(BUTTON_OK))
+  {
+    ret_val = EV_OK;
+  }
+  else if (digitalRead(BUTTON_CANCEL))
+  {
+    ret_val = EV_CANCEL;
+  }
+  else if (digitalRead(BUTTON_NEXT))
+  {
+    ret_val = EV_NEXT;
+  }
+  else if (digitalRead(BUTTON_PREV))
+  {
+    ret_val = EV_PREV;
+  }
+  Serial.print(ret_val);
+  return ret_val;
+}
+
+void ADC_Init()//adc initialization
+{
+  ADCSRA |= ((1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0));//set division factor between system clock 
+//frequency and the input clock to the ADC- 128
+  ADMUX |= (1<<REFS0);//AVcc with external capacitor at Aref pin 
+  ADCSRA |= (1<<ADEN);//enable ADC
+  ADCSRA |= (1<<ADSC);//ADC start conversion
+}
+
+uint16_t read_adc(uint8_t channel)
+{
+  ADMUX &= 0xF0;//set input AO to A5
+  ADMUX |= channel;//select chanel AO to A5
+  ADCSRA |= (1<<ADSC);//start conversion
+  
+  while(ADCSRA & (1<<ADSC));//wait wile adc conversion are not updated 
+   return ADCW;//read and return voltage
+}
+
+ISR(TIMER1_COMPA_vect)
+{ 
+               
+  int numar_CAN=read_adc(0);
+  int tensiune=(float)numar_CAN*5000/1023;
+  temperatura=(tensiune-500)/10;
+  
+  lcd.setCursor(0,0);
+  volatile Buttons event = GetButtons();
+  if (event != EV_NONE)
+  {
+    state_machine(current_menu, event);
+  }
+    print_menu(scroll_menu);
+  
+   eroare = setpoint - temperatura;
+   suma_erori= suma_erori + eroare * dt;
+   derivativa = (eroare - eroare_anterioara) / dt;
+   PID = (kp * eroare) + (ki * suma_erori ) + (kd * derivativa);//PID
+   eroare_anterioara = eroare;
+  
+}
+ 
